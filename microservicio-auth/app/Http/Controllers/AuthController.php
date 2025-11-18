@@ -6,12 +6,14 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Routing\Controller;
+use Tymon\JWTAuth\Facades\JWTAuth; 
 
 class AuthController extends Controller
 {
     public function __construct()
     {
-        $this->middleware('auth:api', ['except' => ['login', 'register']]);
+        $this->middleware('auth:api')->except(['login', 'register']);
     }
 
     public function login(Request $request)
@@ -22,24 +24,25 @@ class AuthController extends Controller
         ]);
 
         if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Datos inválidos',
-                'errors' => $validator->errors()
-            ], 422);
+         return response()->json([
+            'success' => false,
+            'message' => 'Datos inválidos',
+            'errors' => $validator->errors()
+          ], 422);
         }
 
         $credentials = $request->only('email', 'password');
 
-        if (!$token = auth()->attempt($credentials)) {
+        if (!$token = JWTAuth::attempt($credentials)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Credenciales incorrectas'
             ], 401);
         }
 
-        return $this->respondWithToken($token);
+     return $this->respondWithToken($token);
     }
+
 
     public function register(Request $request)
     {
@@ -102,12 +105,12 @@ class AuthController extends Controller
     protected function respondWithToken($token)
     {
         return response()->json([
-            'success' => true,
-            'user' => auth()->user(),
-            'authorization' => [
-                'token' => $token,
-                'type' => 'bearer',
-                'expires_in' => auth()->factory()->getTTL() * 60
+        'success' => true,
+        'user' => auth()->user(),
+        'authorization' => [
+            'token' => $token,
+            'type' => 'bearer',
+            'expires_in' => 3600 
             ]
         ]);
     }

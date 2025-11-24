@@ -1,0 +1,165 @@
+services:
+  # ==================== MySQL ====================
+  mysql:
+    image: mysql:8.0
+    container_name: mysql-db
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: auth_db
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - microservicios
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+      interval: 5s
+
+  # ==================== MongoDB ====================
+  mongodb:
+    image: mongo:7.0
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - microservicios
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==================== Auth Service ====================
+  auth-service:
+    build:
+      context: ./microservicio-auth
+      dockerfile: Dockerfile
+    container_name: auth-service
+    ports:
+      - "8001:8000"
+    environment:
+      APP_ENV: production
+      APP_DEBUG: false
+      DB_CONNECTION: mysql
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_DATABASE: auth_db
+      DB_USERNAME: root
+      DB_PASSWORD: root
+      JWT_SECRET: tu_jwt_secret_aqui
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - microservicios
+    restart: on-failure
+    command: sh -c "php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=8000"
+
+  # ==================== Usuarios Service ====================
+  usuarios-service:
+    build:
+      context: ./microservicio-usuarios
+      dockerfile: Dockerfile
+    container_name: usuarios-service
+    ports:
+      - "8002:8000"
+    environment:
+      APP_ENV: production
+      APP_DEBUG: false
+      DB_CONNECTION: mysql
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_DATABASE: users_db
+      DB_USERNAME: root
+      DB_PASSWORD: root
+      JWT_SECRET: tu_jwt_secret_aqui
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - microservicios
+    restart: on-failure
+    command: sh -c "php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=8000"
+
+  # ==================== Facturación Service ====================
+  facturacion-service:
+    build:
+      context: ./microservicio-facturacion
+      dockerfile: Dockerfile
+    container_name: facturacion-service
+    ports:
+      - "5000:5000"
+    environment:
+      FLASK_ENV: production
+      MONGO_URI: mongodb://mongodb:27017/
+      MONGO_DB_NAME: billing_db
+      JWT_SECRET: tu_jwt_secret_aqui
+      AUTH_SERVICE_URL: http://auth-service:8000
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - microservicios
+    restart: on-failure
+    command: python app.py
+
+  # ==================== Órdenes Service ====================
+  ordenes-service:
+    build:
+      context: ./microservicio-ordenes
+      dockerfile: Dockerfile
+    container_name: ordenes-service
+    ports:
+      - "5001:5001"
+    environment:
+      FLASK_ENV: production
+      MONGO_URI: mongodb://mongodb:27017/
+      MONGO_DB_NAME: orders_db
+      JWT_SECRET: tu_jwt_secret_aqui
+      AUTH_SERVICE_URL: http://auth-service:8000
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - microservicios
+    restart: on-failure
+    command: python app.py
+
+  # ==================== API Gateway ====================
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    container_name: api-gateway
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      AUTH_SERVICE: http://auth-service:8000
+      USERS_SERVICE: http://usuarios-service:8000
+      INVOICES_SERVICE: http://facturacion-service:5000
+      WORKORDERS_SERVICE: http://ordenes-service:5001
+      JWT_SECRET: tu_jwt_secret_aqui
+      CORS_ORIGIN: "*"
+    depends_on:
+      - auth-service
+      - usuarios-service
+      - facturacion-service
+      - ordenes-service
+    networks:
+      - microservicios
+    restart: on-failure
+
+volumes:
+  mysql_data:
+  mongodb_data:
+
+networks:
+  microservicios:
+    driver: bridge
